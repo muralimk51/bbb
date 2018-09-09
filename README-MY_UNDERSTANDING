@@ -1,0 +1,238 @@
+Reference:
+==============
+https://sysplay.in/index.php?pagefile=my_account%2Ftraining&tid=225
+
+
+1. Connect serial cable pins as below:
+=======================================
+   Connect the wires to the J1 headers on your BeagleBone Black as shown:
+
+    Black wire to Pin 1
+
+    Green wire to Pin 4
+
+    White wire to Pin 5
+
+2. Clone Repo:
+===============
+The complete contents (toolchain, code, docs, ...) and more are available from the BBB GIT Repo
+
+ $ git clone https://github.com/sysplay/bbb.git
+
+
+3. Setup to start Workshop:
+===========================
+ $ Steps to setup the git repo for workshop (from the top level folder):
+
++ cd Workshops
++ make ecfd
+
+
+
+4. Toolchain Installation:
+===============================
+Steps to setup the toolchain (from the top level folder):
+
++ cd ../Toolchain
++ sudo ./install_toolchain
+
+Then, logout and login back for its PATH activation.
+
+
+5. Environment Setup:
+==============================
+Steps to setup the environment (on BBB through minicom) for Binary Download:
+
++ Connect Serial cable between BBB and host, follow step 1
++ check dmesg for which tty connected
++ Start minicom using "minicom -o -b 115200 -8 -D /dev/ttyUSB0" on the host, as root / superuser
++ Power up BBB using black USB Cable
+
+On getting CCCC...,
+
+         CCCC.... why because --> When PowerOn BBB, PC points to Boot-ROM(Manufacturer code), Checks and executes Boot Options and gives control to Internal RAM or SD card for piece of code to execute from these locations, This is a Baremetal and nothing founds, So keep on printing CCCC................................
+ 
++ Ctrl + A w -> Line WRAP ON
++ Ctrl + A e -> echo on serial console input entered
+
+
+Execute code in BBB from internal RAM address:
+==============================================
+1. Check the code size and from Which address it executes:
++ Try out in EmbC/ folder:
+
+1) gcc first.c -o first; objdump -d first, Or even
+
+2) arm-linux-gnueabihf-gcc first.c -o first; arm-linux-gnueabihf-objdump -d first
+
+Both the above output contain lot of frills
+
+3) make # To link by hand
+
+4) make show # To notice the frills gone w/ a warning
+
+
+ANALYSIS:
+================
++ first.c
++ gcc -o first first.c
++ ls -alh first       -----> so large file
++ objdump -d first    -----> lot of frills in our code 
+
+    
+.c -> Preprocessor --.i--> Intermediate Code Generation(Machine Independent) -> IC (parse trees) ---> ICG(Machine Dependent) --.S--> Assembler(as) --.o--> Linker(ld) --.exe--> 
+
++ linker does a extra job of assigning address where to load 
+
+
++ arm-linux-gnueabihf-gcc -o first first.c
++ objdump -d first
+ {{{
+first:     file format elf32-little
+
+objdump: can't disassemble for architecture UNKNOWN!
+ }}}
+ The above error is because of linker job
+
+
+Remove frills:
+------------------
+convert .o(linker file) to .elf(executable linux format) and remove frills
+objdump -d first.elf
+  or
+make ; make show
+
+
+Address is different when we check objdump:
+===========================================================
+But not correct address map. Fixing needs linker script. Uncomment "LDFLAGS = -T first.lds" in rules.mk on line #15.
+
+5) make show # Mapped to internal SRAM
+
+Not correct start code. Rename main() to c_entry(). Bring in first_startup.s by uncommenting ENTRY (line #1) & first_startup.o (line #8) in first.lds, and by commenting line #26 & uncommenting line#27 in rules.mk
+
+6) make show # Correct reset vector
+
+Finally, get the stack setup & while (1) in assembly by uncommenting line #5 & #8 in first_startup.s, and by uncommenting the stack_top related 3 lines at the bottom of first.lds
+
+7) make show # All set, except BSS initialization
+
+Verify by generating the map file by uncommenting line #17 in rules.mk
+ + vim first.map
+
+===========================================
+.elf has headers which has to be decoded by loader -> loader is OS specific
+
++ machine code for windows and linux are same, But we can't load. So remove loader specific things in baremetal board and create raw binary.
+Example : wine software
+
+to check the address from where .bin will exeute ->   xxd first.bin (xxd means hexdump)
+
+========================================================================================
+Download raw binary file using xmodem:           
+========================================
+
++ Ctrl + A s -> Select xmodem -> g for selecting directory -> Arrow keys & Space for selecting file -> Enter for triggering download
++ Then press BBB's reset button to complete downloading
+
+
+
+=======================================================================================================================================
+Hands-on programming the hardware (BBB):
+
++ Blinking LEDs using blink_led.c (Refer Sec 25.4 in Docs/am335x_trm.pdf)
+    > Check out common.h, common.c
+    > Uncomment line #28 and comment 2 lines above it in rules.mk
+    > Add blink_led.c in SRCS in Makefile
+    > make
+    > Download blink_led.bin over minicom using xmodem
+
++ Understand the registers capturing in bbb.h
+
++ Check out transformation of blink_led.c into leds.h, leds.c, leds_test.c
+
+
+
+==================================================================================================
+
+Extra Exercise:
+
++ Try out enabling optimization -O2 in rules.mk line #9 along with removing __attribute__((optimize("O0"))) from common.c
++ Observe the missing code in delay function in the output of "make blink_led_disasm"
+
++ Revert back the above changes, once done with the above experimentation
+
+==============================================================================================================
+UART:
+=====
++ Debugging a very basic requirement. So, get set w/ serial library using serial.h, serial.c
+
++ Test using serial_test.c (Add serial_test.c in SRCS in Makefile)
+
++ Check out the more enhanced debug.h, debug.c
+
++ Test using the switch_test.c (while pressing & releasing lone black switch (over GPIO 2 Pin 8) on BBB) (Add switch_test.c in SRCS in Makefile)
+
++ Exercise: Add code in switch_test.c to print global variables initialized to non-zero values and non-initialized global variables - Surprise!!!
+    > Observe that BSS (Block Started by Symbol) section is not initialized to zeros  ---> check in serial_test.map
+    > Uncomment BSS related stuff (bss_begin & bss_end) in first.lds (on line # 14 & from line #17), and Uncomment line #6 & the _clear_bss code (from line # 10) in first_startup.s
+
++ Exercise: Add code in switch_test.c to display the Device Id (Refer Sec 1.1.2 in Docs/am335x_trm.pdf)
+
+===================================================================================================================
+
+Timer:
+=====
+Hands-on programming the hardware (BBB):
+
++ Blinking LED with fixed time using timer_test.c (Refer Section 20.1 in Docs/am335x_trm.pdf)
+    > Check out timer.h, timer.c
+    > Test using the timer_test.c (Add timer_test.c in SRCS in Makefile)
+
++ NB DMTimer0 is hard-coded to 32768Hz clock.
+
+========================================================================================================================
+
+Day 2
+========================================================================================================================
+Interrupts: Understanding the interrupt flow and unmasking:
+===============
+
++ Interrupt Flow: Device / Module (Controller) -> Interrupt Controller -> CPU
++ Handler Flow: Exception Vector (IRQ) -> First level IRQ Handler -> Interrupt Vector (in s/w) -> Second level IRQ specific Handler
++ Interrupt Masking: CPU level -> Interrupt Controller level -> Module (e.g. Timer) level
+
+Experiment: Blinking LED with fixed time in timer_test.c using interrupt (Refer Section 20.1 in Docs/am335x_trm.pdf)
+
++ Check out interrupt.h, interrupt.c (Refer to Section 26.1.3 and Chapter 6 in Docs/am335x_trm.pdf, and Section 2.14 (pg 61) in Docs/DDI0344K_cortex_a8_r3p2_trm.pdf)
++ Check out startup.s, linker.lds
++ Uncomment line #16 and comment the line above it in rules.mk (for using the new linker script linker.lds)
++ Uncomment line #29 and comment 3 lines above it in rules.mk (for using the new assembly file startup.s)
++ Uncomment line #7 in timer.h to enable using interrupt.
++ make
++ Download timer_test.bin over minicom using xmodem
++ And check it toggling LED every 1 second (after pressing an Enter)
+
+
+===================================================
+
+
+
+Hands-on programming the external interface I2C on the BBB:
+===============
+
++ Check out i2c.h, i2c.c to understand the BBB's I2C Controller (Refer Chapter 21 in Docs/am335x_trm.pdf)
++ Check out eeprom.h, eeprom.c to understand the EEPROM access over I2C
++ Add eeprom_test.c in SRCS in Makefile
++ make
++ Download eeprom_test.bin over minicom using xmodem
++ And check it reading 0xEE3355AA values from EEPROM (after pressing an Enter)
+
+
+
+
+Assimilate all the learnings till now to develop a piece of firmware - shell-like interface - EmbC/fw_app.c
+==============================================================================================================
++ Implement LED operations (l 0|1 for switching off | on led 0)
++ Implement Timer operations (b <msecs> for blinking led 3 w/ <msecs> interval, stop if <msecs> is 0)
++ Implement EEPROM operations (r <addr> <cnt> for eeprom reading of <cnt> bytes from addr <addr>)
